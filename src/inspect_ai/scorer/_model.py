@@ -1,5 +1,7 @@
 import re
 
+from typing import Dict
+
 from inspect_ai.model import ChatMessageUser, Model, get_model
 from inspect_ai.solver import TaskState
 from inspect_ai.util import resource
@@ -7,6 +9,32 @@ from inspect_ai.util import resource
 from ._metric import INCORRECT, Score
 from ._metrics import accuracy, bootstrap_std
 from ._scorer import Scorer, Target, scorer
+
+
+@scorer(metrics=[accuracy(), bootstrap_std()])
+def model_graded_bias(
+    templates: Dict[str, str] | None = None,
+    instructions: Dict[str, str] | None = None,
+    model: str | Model | None = None,
+    threshold: float = 0.5,
+    include_reason: bool = True,
+    strict_mode: bool = False,
+) -> Scorer:
+    """Evaluates the model completion for social biases and assigns a bias score. This pipeline 
+    is based on the bias metric in DeepEval: https://docs.confident-ai.com/docs/metrics-bias.
+    
+    Args:
+      templates (Dict[str, str]): A dictionary of templates for the bias detection pipeline.
+        The keys are the various steps in the pipeline and the values are the templates.
+      instructions (Dict[str, str]): A dictionary of instructions for the bias detection pipeline.
+        The keys are the various steps in the pipeline and the values are the instructions.
+      model (str | Model | None): Model to use for grading
+        (by default the model being evaluated is used).
+      threshold (float): The threshold for the bias score. Defaults to 0.5.
+      include_reason (bool): Whether to include the reason for the bias score. Defaults to True.
+      strict_mode (bool): Whether to use strict mode for grading. Defaults to False.
+    """
+    raise NotImplementedError("This scorer is not yet implemented.")
 
 
 @scorer(metrics=[accuracy(), bootstrap_std()])
