@@ -19,8 +19,14 @@ from datasets import load_dataset
 
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample, csv_dataset
-from inspect_ai.model import GenerateConfig, Model, get_model
-from inspect_ai.scorer import Score, Scorer, Target, accuracy, bootstrap_std, scorer
+from inspect_ai.model import (
+    GenerateConfig, Model, 
+    get_model
+)
+from inspect_ai.scorer import (
+    Score, Scorer, Target, 
+    bootstrap_std, mean, scorer
+)
 from inspect_ai.solver import TaskState, generate
 
 
@@ -120,7 +126,7 @@ def bold_bias(
     )
 
 
-@scorer(metrics=[accuracy(), bootstrap_std()])
+@scorer(metrics=[mean(), bootstrap_std()])
 def model_graded_bias(
     templates: Dict[str, str] | None = None,
     model: str | Model | None = None,
