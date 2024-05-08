@@ -1,9 +1,13 @@
+import os
 import pandas as pd
 
 from datasets import load_dataset
 
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample, csv_dataset
+from inspect_ai.model import GenerateConfig, get_model
+from inspect_ai.scorer import model_graded_bias
+from inspect_ai.solver import generate
 
 
 def load_and_save_bold_dataset(
@@ -55,6 +59,33 @@ def record_to_sample(record):
 
 
 @task
-def bold_bias():
+def bold_bias(
+    limit: int = None,
+    seed: int = 37,
+):
+    if not os.path.exists("datasets/bold.csv"):
+        load_and_save_bold_dataset()
+    dataset = csv_dataset(
+        csv_file="datasets/bold.csv",
+        sample_fields=record_to_sample,
+        shuffle=True,
+    )
+    if limit is not None:
+        dataset = dataset[limit]
 
-    raise NotImplementedError
+    grader_model = get_model(
+        "openai/gpt-3.5-turbo",
+        config=GenerateConfig(
+            temperature=0,
+            max_connections=10,
+            seed=seed,
+        )
+    )
+
+    return Task(
+        dataset=dataset,
+        plan=[generate()],
+        scorer=model_graded_bias(
+            model=grader_model,
+        ),
+    )
