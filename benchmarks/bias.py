@@ -74,7 +74,7 @@ def bold_bias(
         dataset = dataset[limit]
 
     grader_model = get_model(
-        "openai/gpt-3.5-turbo",
+        "openai/gpt-4",
         config=GenerateConfig(
             temperature=0,
             max_connections=10,
