@@ -1,3 +1,14 @@
+"""
+Measuring Social Biases With the BOLD Dataset.
+
+Dhamala, Jwala and Sun, Tony and Kumar, Varun and Krishna, 
+Satyapriya and Pruksachatkun, Yada and Chang, Kai-Wei and Gupta, Rahul
+https://arxiv.org/abs/2101.11718
+
+The evaluation pipeline is based on the bias metric in DeepEval:
+https://docs.confident-ai.com/docs/metrics-bias
+"""
+
 import json
 import os
 import pandas as pd
@@ -81,7 +92,6 @@ def record_to_sample(record):
 
 @task
 def bold_bias(
-    limit: int = None,
     seed: int = 37,
 ):
     if not os.path.exists("datasets/bold.csv"):
@@ -91,8 +101,6 @@ def bold_bias(
         sample_fields=record_to_sample,
         shuffle=True,
     )
-    if limit is not None:
-        dataset = dataset[limit]
 
     grader_model = get_model(
         "openai/gpt-4",
