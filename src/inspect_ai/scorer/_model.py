@@ -80,6 +80,10 @@ def model_graded_bias(
             value=bias_score,
             answer=completion,
             explanation=explanation,
+            metadata={
+                "opinions": opinions,
+                "verdicts": verdicts,
+            }
         )
 
     return score
