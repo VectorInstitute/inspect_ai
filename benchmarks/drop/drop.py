@@ -98,7 +98,9 @@ async def process_results(preds: Union[str, List[str]], golds: List) -> Tuple[fl
     return (max_em, max_f1)
 
 
-async def get_metrics(predicted: Union[str, List[str]], gold: Union[str, List[str], Tuple[str]]) -> Tuple[float]:
+async def get_metrics(
+    predicted: Union[str, List[str]], gold: Union[str, List[str], Tuple[str]]
+) -> Tuple[float]:
     """Takes a predicted answer and a gold answer (that are both either a string or a list of strings), and returns exact match and the DROP F1 metric for the prediction.
 
     If you are writing a script for evaluating objects in memory (say, the output of predictions during
@@ -238,9 +240,9 @@ async def _normalize(answer: str) -> str:
 
 
 def format_input(doc: Dict) -> str:
-    passage_str = f'''Passage: {doc["passage"]}'''
-    question_str = f'''Question: {doc["question"]}'''
-    answer_str = '''Answer:'''
+    passage_str = f"""Passage: {doc["passage"]}"""
+    question_str = f"""Question: {doc["question"]}"""
+    answer_str = """Answer:"""
     input_str = "\n".join([passage_str, question_str, answer_str])
     return input_str
 
@@ -262,14 +264,12 @@ def record_to_sample(record: Dict) -> Sample:
 
 def sample_to_fewshot(sample: Sample) -> str:
     target = sample.target[0].split("|")[0]
-    return (f"""{sample.input} {target}""")
+    return f"""{sample.input} {target}"""
 
 
 @scorer(metrics=[mean(), bootstrap_std()])
 def drop_f1_scorer():
-
     async def score(state: TaskState, target: Target) -> Score:
-
         # Get generated answer
         answer = state.output.completion
 
@@ -289,7 +289,7 @@ def drop_f1_scorer():
                     "em_score": em_score,
                 },
                 "gold_answers": ref_answers,
-            }
+            },
         )
 
     return score
@@ -297,7 +297,6 @@ def drop_f1_scorer():
 
 @solver
 def drop_output_parser(model: ModelName, no_prompt_template: bool):
-
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         answer = state.output.completion
         state.metadata = {
@@ -324,17 +323,22 @@ def drop_output_parser(model: ModelName, no_prompt_template: bool):
 def wrap_user_msg(prompt: str, model: ModelName) -> str:
     match model:
         case "Meta-Llama-3-8B-Instruct" | "Meta-Llama-3-70B-Instruct":
-            prompt = """<|start_header_id|>user<|end_header_id|>\n\n""" + \
-                prompt.strip("\n") + \
-                """<|eot_id|>\n<|start_header_id|>assistant<|end_header_id|>"""
+            prompt = (
+                """<|start_header_id|>user<|end_header_id|>\n\n"""
+                + prompt.strip("\n")
+                + """<|eot_id|>\n<|start_header_id|>assistant<|end_header_id|>"""
+            )
     return prompt
 
 
 def wrap_sys_msg(prompt: str, model: ModelName) -> str:
     match model:
         case "Meta-Llama-3-8B-Instruct" | "Meta-Llama-3-70B-Instruct":
-            prompt = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n""" + \
-                prompt.strip("\n") + """<|eot_id|>"""
+            prompt = (
+                """<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"""
+                + prompt.strip("\n")
+                + """<|eot_id|>"""
+            )
     return prompt
 
 
@@ -345,9 +349,9 @@ ANSWER_PATTERN = r"(?i)Answer\s*:\s*([^\n]+)"
 @task
 def drop(
     model: ModelName,
-    no_prompt_template: bool=False,
-    fewshot: int=3,
-    fewshot_seed: int=42
+    no_prompt_template: bool = False,
+    fewshot: int = 3,
+    fewshot_seed: int = 42,
 ) -> Task:
     """Inspect task implementing the DROP benchmark.
 
@@ -371,7 +375,11 @@ def drop(
         prompt_sys = ""
         prompt_sys_w_examples = """{examples}\n\n"""
 
-    plan = [prompt_template(prompt_user), generate(), drop_output_parser(model, no_prompt_template)]
+    plan = [
+        prompt_template(prompt_user),
+        generate(),
+        drop_output_parser(model, no_prompt_template),
+    ]
 
     if fewshot:
         fewshots = hf_dataset(
@@ -387,16 +395,15 @@ def drop(
             0,
             system_message(
                 prompt_sys_w_examples.format(
-                    examples="\n\n".join([sample_to_fewshot(sample) for sample in fewshots])
+                    examples="\n\n".join(
+                        [sample_to_fewshot(sample) for sample in fewshots]
+                    )
                 )
-            )
+            ),
         )
     else:
         if prompt_sys != "":
-            plan.insert(
-                0,
-                system_message(prompt_sys)
-            )
+            plan.insert(0, system_message(prompt_sys))
 
     return Task(
         dataset=hf_dataset(
@@ -413,8 +420,8 @@ def drop(
 DROP_PROMPT_TEMPLATE = {
     # Based on the prompt provided here: https://github.com/openai/simple-evals/blob/main/drop_eval.py#L261C13-L283C91
     "system": """You will be asked to read a passage and answer a question.\n\n""",
-    "system_w_examples": """You will be asked to read a passage and answer a question. Some examples of passages and Q&A are provided below.\n\n""" + \
-        """Examples\n{examples}\n\n""",
-    "user": """Your Task\n---\n{prompt}\n\n""" + \
-        """Think step by step, then write a line of the form "Answer: $ANSWER" at the end of your response.\n""",
+    "system_w_examples": """You will be asked to read a passage and answer a question. Some examples of passages and Q&A are provided below.\n\n"""
+    + """Examples\n{examples}\n\n""",
+    "user": """Your Task\n---\n{prompt}\n\n"""
+    + """Think step by step, then write a line of the form "Answer: $ANSWER" at the end of your response.\n""",
 }
