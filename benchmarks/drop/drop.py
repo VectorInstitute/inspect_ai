@@ -38,6 +38,196 @@ from inspect_ai.solver import (
     system_message,
 )
 
+DROP_PROMPT_TEMPLATE = {
+    # Based on the prompt provided here: https://github.com/openai/simple-evals/blob/main/drop_eval.py#L261C13-L283C91
+    "system": """You will be asked to read a passage and answer a question.\n\n""",
+    "system_w_examples": """You will be asked to read a passage and answer a question. Some examples of passages and Q&A are provided below.\n\n"""
+    + """Examples\n{examples}\n\n""",
+    "user": """Your Task\n---\n{prompt}\n\n"""
+    + """Think step by step, then write a line of the form "Answer: $ANSWER" at the end of your response.\n""",
+}
+
+# Borrowed from: https://github.com/openai/simple-evals/blob/main/common.py#L24
+ANSWER_PATTERN = r"(?i)Answer\s*:\s*([^\n]+)"
+
+
+@task
+def drop(
+    model: ModelName,
+    no_prompt_template: bool = False,
+    fewshot: int = 3,
+    fewshot_seed: int = 42,
+) -> Task:
+    """Inspect task implementing the DROP benchmark.
+
+    Arguments:
+        model (ModelName): Name (or path) of the model being used.
+        no_prompt_template (bool): Set to true for not applying any
+            prompt template. Default is false.
+        fewshot (int): Number of few shot examples to use.
+        fewshot_seed (int): Random seed for sampling few shot examples.
+    """
+    if not no_prompt_template:
+        # Get prompt
+        prompt_dict = DROP_PROMPT_TEMPLATE
+
+        # Apply model specific templates
+        prompt_user = wrap_user_msg(prompt_dict["user"], model)
+        prompt_sys = wrap_sys_msg(prompt_dict["system"], model)
+        prompt_sys_w_examples = wrap_sys_msg(prompt_dict["system_w_examples"], model)
+    else:
+        prompt_user = """{prompt}"""
+        prompt_sys = ""
+        prompt_sys_w_examples = """{examples}\n\n"""
+
+    plan = [
+        prompt_template(prompt_user),
+        generate(),
+        drop_output_parser(model, no_prompt_template),
+    ]
+
+    if fewshot:
+        fewshots = hf_dataset(
+            "EleutherAI/drop",
+            split="train",
+            trust=True,
+            sample_fields=record_to_sample,
+            shuffle=True,
+            seed=fewshot_seed,
+            limit=fewshot,
+        )
+        plan.insert(
+            0,
+            system_message(
+                prompt_sys_w_examples.format(
+                    examples="\n\n".join(
+                        [sample_to_fewshot(sample) for sample in fewshots]
+                    )
+                )
+            ),
+        )
+    else:
+        if prompt_sys != "":
+            plan.insert(0, system_message(prompt_sys))
+
+    return Task(
+        dataset=hf_dataset(
+            "EleutherAI/drop",
+            split="validation",
+            trust=True,
+            sample_fields=record_to_sample,
+        ),
+        plan=plan,
+        scorer=drop_f1_scorer(),
+    )
+
+
+@solver
+def drop_output_parser(model: ModelName, no_prompt_template: bool):
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        answer = state.output.completion
+        state.metadata = {
+            "raw_completion": answer,
+        }
+
+        # Extract relevant answer text
+        match = re.search(ANSWER_PATTERN, answer)
+        extracted_answer = match.group(1) if match else answer
+
+        # Model specific parsing, if required
+        if no_prompt_template:
+            extracted_answer = extracted_answer.split("\n\n")[0].strip()
+        else:
+            match model:
+                case "Meta-Llama-3-8B-Instruct" | "Meta-Llama-3-70B-Instruct":
+                    extracted_answer = extracted_answer.split("<|eot_id|>")[0]
+
+        state.output.completion = extracted_answer
+
+        return state
+
+    return solve
+
+
+@scorer(metrics=[mean(), bootstrap_std()])
+def drop_f1_scorer():
+    async def score(state: TaskState, target: Target) -> Score:
+        # Get generated answer
+        answer = state.output.completion
+
+        # Get target answers
+        ref_answers = target.target
+        # Convert str elm to tuple by splitting on "|"
+        ref_answers = [tuple(elm.split("|")) for elm in ref_answers]
+
+        # Compute exact match (EM) and F1 score
+        em_score, f1_score = await process_results(answer, ref_answers)
+
+        # F1 score reported as main aggregated metric, EM score added to metadata
+        return Score(
+            value=f1_score,
+            answer=answer,
+            metadata={
+                "metrics": {
+                    "f1_score": f1_score,
+                    "em_score": em_score,
+                },
+                "gold_answers": ref_answers,
+            },
+        )
+
+    return score
+
+
+def record_to_sample(record: Dict) -> Sample:
+    return Sample(
+        input=format_input(record),
+        target=format_target(record),
+        id=record["query_id"],
+    )
+
+
+def format_input(doc: Dict) -> str:
+    passage_str = f"""Passage: {doc["passage"]}"""
+    question_str = f"""Question: {doc["question"]}"""
+    answer_str = """Answer:"""
+    input_str = "\n".join([passage_str, question_str, answer_str])
+    return input_str
+
+
+def format_target(doc: Dict) -> List[str]:
+    target = get_answers(doc)
+    # Convert each tuple to str, since 'target' only accepts 'str' or 'List[str]'.
+    target = ["|".join(elm) for elm in target]
+    return target
+
+
+def wrap_user_msg(prompt: str, model: ModelName) -> str:
+    match model:
+        case "Meta-Llama-3-8B-Instruct" | "Meta-Llama-3-70B-Instruct":
+            prompt = (
+                """<|start_header_id|>user<|end_header_id|>\n\n"""
+                + prompt.strip("\n")
+                + """<|eot_id|>\n<|start_header_id|>assistant<|end_header_id|>"""
+            )
+    return prompt
+
+
+def wrap_sys_msg(prompt: str, model: ModelName) -> str:
+    match model:
+        case "Meta-Llama-3-8B-Instruct" | "Meta-Llama-3-70B-Instruct":
+            prompt = (
+                """<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"""
+                + prompt.strip("\n")
+                + """<|eot_id|>"""
+            )
+    return prompt
+
+
+def sample_to_fewshot(sample: Sample) -> str:
+    target = sample.target[0].split("|")[0]
+    return f"""{sample.input} {target}"""
+
 
 # Copied from
 # https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/drop/utils.py#L23C1-L49C19
@@ -237,191 +427,3 @@ async def _normalize(answer: str) -> str:
     tokens = [token for token in tokens if token.strip()]
     normalized = " ".join(tokens).strip()
     return normalized
-
-
-def format_input(doc: Dict) -> str:
-    passage_str = f"""Passage: {doc["passage"]}"""
-    question_str = f"""Question: {doc["question"]}"""
-    answer_str = """Answer:"""
-    input_str = "\n".join([passage_str, question_str, answer_str])
-    return input_str
-
-
-def format_target(doc: Dict) -> List[str]:
-    target = get_answers(doc)
-    # Convert each tuple to str, since 'target' only accepts 'str' or 'List[str]'.
-    target = ["|".join(elm) for elm in target]
-    return target
-
-
-def record_to_sample(record: Dict) -> Sample:
-    return Sample(
-        input=format_input(record),
-        target=format_target(record),
-        id=record["query_id"],
-    )
-
-
-def sample_to_fewshot(sample: Sample) -> str:
-    target = sample.target[0].split("|")[0]
-    return f"""{sample.input} {target}"""
-
-
-@scorer(metrics=[mean(), bootstrap_std()])
-def drop_f1_scorer():
-    async def score(state: TaskState, target: Target) -> Score:
-        # Get generated answer
-        answer = state.output.completion
-
-        # Get target answers
-        ref_answers = target.target
-        # Convert str elm to tuple by splitting on "|"
-        ref_answers = [tuple(elm.split("|")) for elm in ref_answers]
-
-        em_score, f1_score = await process_results(answer, ref_answers)
-
-        return Score(
-            value=f1_score,
-            answer=answer,
-            metadata={
-                "metrics": {
-                    "f1_score": f1_score,
-                    "em_score": em_score,
-                },
-                "gold_answers": ref_answers,
-            },
-        )
-
-    return score
-
-
-@solver
-def drop_output_parser(model: ModelName, no_prompt_template: bool):
-    async def solve(state: TaskState, generate: Generate) -> TaskState:
-        answer = state.output.completion
-        state.metadata = {
-            "raw_completion": answer,
-        }
-
-        match = re.search(ANSWER_PATTERN, answer)
-        extracted_answer = match.group(1) if match else answer
-
-        if no_prompt_template:
-            extracted_answer = extracted_answer.split("\n\n")[0].strip()
-        else:
-            match model:
-                case "Meta-Llama-3-8B-Instruct" | "Meta-Llama-3-70B-Instruct":
-                    extracted_answer = extracted_answer.split("<|eot_id|>")[0]
-
-        state.output.completion = extracted_answer
-
-        return state
-
-    return solve
-
-
-def wrap_user_msg(prompt: str, model: ModelName) -> str:
-    match model:
-        case "Meta-Llama-3-8B-Instruct" | "Meta-Llama-3-70B-Instruct":
-            prompt = (
-                """<|start_header_id|>user<|end_header_id|>\n\n"""
-                + prompt.strip("\n")
-                + """<|eot_id|>\n<|start_header_id|>assistant<|end_header_id|>"""
-            )
-    return prompt
-
-
-def wrap_sys_msg(prompt: str, model: ModelName) -> str:
-    match model:
-        case "Meta-Llama-3-8B-Instruct" | "Meta-Llama-3-70B-Instruct":
-            prompt = (
-                """<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"""
-                + prompt.strip("\n")
-                + """<|eot_id|>"""
-            )
-    return prompt
-
-
-# Borrowed from: https://github.com/openai/simple-evals/blob/main/common.py#L24
-ANSWER_PATTERN = r"(?i)Answer\s*:\s*([^\n]+)"
-
-
-@task
-def drop(
-    model: ModelName,
-    no_prompt_template: bool = False,
-    fewshot: int = 3,
-    fewshot_seed: int = 42,
-) -> Task:
-    """Inspect task implementing the DROP benchmark.
-
-    Arguments:
-        model (ModelName): Name (or path) of the model being used.
-        no_prompt_template (bool): Set to true for not applying any
-            prompt template. Default is false.
-        fewshot (int): Number of few shot examples to use.
-        fewshot_seed (int): Random seed for sampling few shot examples.
-    """
-    if not no_prompt_template:
-        # Get prompt
-        prompt_dict = DROP_PROMPT_TEMPLATE
-
-        # Apply model specific templates
-        prompt_user = wrap_user_msg(prompt_dict["user"], model)
-        prompt_sys = wrap_sys_msg(prompt_dict["system"], model)
-        prompt_sys_w_examples = wrap_sys_msg(prompt_dict["system_w_examples"], model)
-    else:
-        prompt_user = """{prompt}"""
-        prompt_sys = ""
-        prompt_sys_w_examples = """{examples}\n\n"""
-
-    plan = [
-        prompt_template(prompt_user),
-        generate(),
-        drop_output_parser(model, no_prompt_template),
-    ]
-
-    if fewshot:
-        fewshots = hf_dataset(
-            "EleutherAI/drop",
-            split="train",
-            trust=True,
-            sample_fields=record_to_sample,
-            shuffle=True,
-            seed=fewshot_seed,
-            limit=fewshot,
-        )
-        plan.insert(
-            0,
-            system_message(
-                prompt_sys_w_examples.format(
-                    examples="\n\n".join(
-                        [sample_to_fewshot(sample) for sample in fewshots]
-                    )
-                )
-            ),
-        )
-    else:
-        if prompt_sys != "":
-            plan.insert(0, system_message(prompt_sys))
-
-    return Task(
-        dataset=hf_dataset(
-            "EleutherAI/drop",
-            split="validation",
-            trust=True,
-            sample_fields=record_to_sample,
-        ),
-        plan=plan,
-        scorer=drop_f1_scorer(),
-    )
-
-
-DROP_PROMPT_TEMPLATE = {
-    # Based on the prompt provided here: https://github.com/openai/simple-evals/blob/main/drop_eval.py#L261C13-L283C91
-    "system": """You will be asked to read a passage and answer a question.\n\n""",
-    "system_w_examples": """You will be asked to read a passage and answer a question. Some examples of passages and Q&A are provided below.\n\n"""
-    + """Examples\n{examples}\n\n""",
-    "user": """Your Task\n---\n{prompt}\n\n"""
-    + """Think step by step, then write a line of the form "Answer: $ANSWER" at the end of your response.\n""",
-}
