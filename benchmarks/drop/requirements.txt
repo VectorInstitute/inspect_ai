@@ -1,0 +1,4 @@
+inspect-ai==0.3.18
+datasets==2.20.0
+openai==1.37.0
+scipy==1.14.0
