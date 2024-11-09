@@ -264,6 +264,8 @@ async def as_chat_messages(messages: list[ChatMessage]) -> list[ContentDict]:
     # (if there is no first user message then prepend one)
     prepend_system_messages(chat_messages, system_messages)
 
+    merge_tool_calls(chat_messages)
+
     # return messages
     return chat_messages
 
@@ -545,3 +547,18 @@ def str_to_harm_block_threshold(threshold: str) -> HarmBlockThreshold:
         return HarmBlockThreshold.BLOCK_NONE
     else:
         raise ValueError(f"Unknown HarmBlockThreshold: {threshold}")
+    
+
+def merge_tool_calls(messages: list[ContentDict]) -> None:
+    """
+    Gemini API expects a "model" message after a "function" message, therefore we merge multiple
+    tool calls into one
+    """
+    i = 0  
+    while i < len(messages) - 1:
+        # If the consecutive messages are tool calls, extend the next message into the current one
+        if messages[i]["role"] == "function" and messages[i + 1]["role"] == "function":
+            messages[i]['parts'].extend(messages[i + 1]['parts'])
+            del messages[i + 1]
+        else:
+            i += 1
