@@ -166,7 +166,7 @@ class GoogleAPI(ModelAPI):
 
                 # gemini-1.5-pro would occasionally return empty message with stop reason
                 # "MALFORMED_FUNCTION_CALL", this is a bug in the API, so we retry
-                if response.candidates[0].finish_reason != "MALFORMED_FUNCTION_CALL":
+                if response.candidates[0].finish_reason != Candidate.FinishReason.MALFORMED_FUNCTION_CALL:
                     break
 
             except InvalidArgument as ex:
