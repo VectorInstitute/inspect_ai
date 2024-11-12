@@ -151,19 +151,26 @@ class GoogleAPI(ModelAPI):
             )
 
         # cast to AsyncGenerateContentResponse since we passed stream=False
-        try:
-            response = cast(
-                AsyncGenerateContentResponse,
-                await self.model.generate_content_async(
-                    contents=contents,
-                    safety_settings=self.safety_settings,
-                    generation_config=parameters,
-                    tools=gemini_tools,
-                    tool_config=gemini_tool_config,
-                ),
-            )
-        except InvalidArgument as ex:
-            return self.handle_invalid_argument(ex), model_call()
+        while True:
+            try:
+                response = cast(
+                    AsyncGenerateContentResponse,
+                    await self.model.generate_content_async(
+                        contents=contents,
+                        safety_settings=self.safety_settings,
+                        generation_config=parameters,
+                        tools=gemini_tools,
+                        tool_config=gemini_tool_config,
+                    ),
+                )
+
+                # gemini-1.5-pro would occasionally return empty message with stop reason
+                # "MALFORMED_FUNCTION_CALL", this is a bug in the API, so we retry
+                if response.candidates[0].finish_reason != "MALFORMED_FUNCTION_CALL":
+                    break
+
+            except InvalidArgument as ex:
+                return self.handle_invalid_argument(ex), model_call()
 
         # build output
         output = ModelOutput(
