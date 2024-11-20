@@ -276,13 +276,10 @@ def web_browser_back() -> Tool:
        Web browser back navigation tool.
     """
 
-    async def execute(placeholder: str="") -> str:
+    async def execute() -> str:
         """Navigate the web browser back in the browser history.
 
         If you want to view a page that you have previously browsed (or perhaps just didn't find what you were looking for on a page and want to backtrack) use the web_browser_back tool.
-
-        Args:
-            placeholder (str): Putting a placeholder to accomodate Gemini requirements.
 
         Returns:
            Web accessibility tree of the visible elements of the web page. The element_id of each element is displayed in brackets at the beginning of the line.
@@ -300,13 +297,10 @@ def web_browser_forward() -> Tool:
        Web browser forward navigation tool.
     """
 
-    async def execute(placeholder: str="") -> str:
+    async def execute() -> str:
         """Navigate the web browser forward in the browser history.
 
         If you have navigated back in the browser history and then want to navigate forward use the web_browser_forward tool.
-
-        Args:
-            placeholder (str): Putting a placeholder to accomodate Gemini requirements.
 
         Returns:
            Web accessibility tree of the visible elements of the web page. The element_id of each element is displayed in brackets at the beginning of the line.
@@ -324,13 +318,10 @@ def web_browser_refresh() -> Tool:
        Web browser page refresh tool.
     """
 
-    async def execute(placeholder: str="") -> str:
+    async def execute() -> str:
         """Refresh the current page of the web browser.
 
         If you have interacted with a page by clicking buttons and want to reset it to its original state, use the web_browser_refresh tool.
-
-        Args:
-            placeholder (str): Putting a placeholder to accomodate Gemini requirements.
 
         Returns:
            Web accessibility tree of the visible elements of the web page. The element_id of each element is displayed in brackets at the beginning of the line.
